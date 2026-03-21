@@ -43,6 +43,8 @@ class BanPass(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         # 初始化数据文件管理器
         super().__init__(context, config)
+        self.wake_prefix = [""]
+        self.wake_prefix.extend(self.context.get_config().get('wake_prefix', []))
         self.manager = banpass_manager.BanPassManager(
             StarTools.get_data_dir()
         )
@@ -230,7 +232,8 @@ class BanPass(Star):
         全局事件过滤器：
         如果禁用功能启用且发送者被禁用，则停止事件传播，机器人不再响应该用户的消息。
         """
-        if "bancheck" in event.message_str.strip():
+        event_msg = event.message_str.strip()
+        if any([event_msg.startswith(_prefix+"bancheck") for _prefix in self.wake_prefix]):
             return
         if self.manager.is_baned(event.unified_msg_origin, event.get_sender_id()):
             logger.info(f"用户{event.get_sender_id()}已从{event.unified_msg_origin}被禁用")
