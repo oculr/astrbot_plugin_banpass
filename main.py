@@ -1,190 +1,80 @@
-# pass > ban > pass-all > ban-all
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
-from astrbot.api.star import Context, Star, StarTools
+import astrbot.api.message_components as message_components
 from astrbot.api import logger, AstrBotConfig
-import astrbot.api.message_components as Comp
-import json
-import time as time_module
-import re
+from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.star import Context, Star, StarTools
 
-from . import strings, time_utils
-from .datafile_manager import DatafileManager
-from .user_manager import UserDataList, UserDataModel, EventUtils, AtNumberError
+import time
 
+from . import time_utils, strings, banpass_manager
+
+
+def extract_args(event: AstrMessageEvent):
+    """
+    返回 用户列表user_ids[str], 封禁时间time, 封禁原因reason
+    """
+    at_users = []
+    _time = float('inf')
+    _reason = strings.MSG_NO_REASON
+
+    args = ""
+    msgs = event.get_messages()
+    at_component_pos = 0
+    for i in range(len(msgs)):
+        if isinstance(msgs[i], message_components.At) and getattr(msgs[i], "qq") != event.get_self_id():
+            at_users.append(str(msgs[i].qq))
+            at_component_pos = i
+
+    if at_component_pos+1 >= len(msgs):
+        return at_users, _time, _reason
+
+    # /ban [At:] [At:] [At:] 1d 原因xxx
+    for i in range(at_component_pos+1, len(msgs)):
+        if isinstance(msgs[i], message_components.Plain) and getattr(msgs[i], "text"):
+            args += getattr(msgs[i], "text")
+
+    split = args.split()
+    if len(split) >= 1:
+        _time = time_utils.time_str_to_float(split[0])
+    if len(split) >= 2:
+        _reason = split[1]
+    return at_users, _time, _reason
 
 class ReNeBan(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
-        super().__init__(context)
-        # 从插件配置中获取是否启用禁用功能，默认为启用
-        self.enable = config.get("enable", True)
-        # 从插件配置中获取缓存存活时间，默认为60秒
-        cache_ttl = config.get("cache_ttl", 60)
         # 初始化数据文件管理器
-        self.data_manager = DatafileManager(
-            StarTools.get_data_dir(), cache_ttl=cache_ttl
+        super().__init__(context, config)
+        self.manager = banpass_manager.BanPassManager(
+            StarTools.get_data_dir()
         )
 
-    @filter.command("banlist")
-    async def banlist(self, event: AstrMessageEvent):
-        """
-        显示当前群禁用名单
-        """
-        # 禁用功能未启用
-        if not self.enable:
-            group_banned_text = (
-                strings.messages["group_banned_list"]
-                + strings.messages["no_group_banned"]
-            )
-            global_banned_text = (
-                strings.messages["global_banned_list"]
-                + strings.messages["no_global_banned"]
-            )
-            group_passed_text = (
-                strings.messages["group_passed_list"]
-                + strings.messages["no_group_passed"]
-            )
-            global_passed_text = (
-                strings.messages["global_passed_list"]
-                + strings.messages["no_global_passed"]
-            )
-            result = f"{group_banned_text}\n\n{global_banned_text}\n\n{group_passed_text}\n\n{global_passed_text}"
-            yield event.plain_result(result)
-            return
-        self.data_manager.clear_banned()
-        # 获取UMO
-        umo = event.unified_msg_origin
-        # get_pass
-        passlist = self.data_manager.read_file(
-            self.data_manager.passlist_path
-        )  # dict[str, UserDataList]
-        group_passed_list = (
-            passlist.get(umo)
-            if isinstance(passlist.get(umo), UserDataList)
-            else UserDataList()
-        )
-        # get_pass-all
-        global_passed_list = self.data_manager.read_file(
-            self.data_manager.passall_list_path
-        )  # UserDataList
-        # get_ban-all
-        global_banned_list = self.data_manager.read_file(
-            self.data_manager.banall_list_path
-        )  # UserDataList
-        # get_ban
-        banlist = self.data_manager.read_file(
-            self.data_manager.banlist_path
-        )  # dict[str, UserDataList]
-        group_banned_list = (
-            banlist.get(umo)
-            if isinstance(banlist.get(umo), UserDataList)
-            else UserDataList()
-        )
-        group_banned_str_list = [
-            strings.messages["banlist_strlist_format"].format(
-                user=item.uid,
-                time=time_utils.timelast_format(
-                    (item.time - int(time_module.time())) if item.time != 0 else 0
-                ),
-                reason=item.reason if item.reason else strings.messages["no_reason"],
-            )
-            for item in group_banned_list
-        ]
-        if not group_banned_str_list:
-            group_banned_str_list.append(strings.messages["no_group_banned"])
-        global_banned_str_list = [
-            strings.messages["banlist_strlist_format"].format(
-                user=item.uid,
-                time=time_utils.timelast_format(
-                    (item.time - int(time_module.time())) if item.time != 0 else 0
-                ),
-                reason=item.reason if item.reason else strings.messages["no_reason"],
-            )
-            for item in global_banned_list
-        ]
-        if not global_banned_str_list:
-            global_banned_str_list.append(strings.messages["no_global_banned"])
-        group_passed_str_list = [
-            strings.messages["banlist_strlist_format"].format(
-                user=item.uid,
-                time=time_utils.timelast_format(
-                    (item.time - int(time_module.time())) if item.time != 0 else 0
-                ),
-                reason=item.reason if item.reason else strings.messages["no_reason"],
-            )
-            for item in group_passed_list
-        ]
-        if not group_passed_str_list:
-            group_passed_str_list.append(strings.messages["no_group_passed"])
-        global_passed_str_list = [
-            strings.messages["banlist_strlist_format"].format(
-                user=item.uid,
-                time=time_utils.timelast_format(
-                    (item.time - int(time_module.time())) if item.time != 0 else 0
-                ),
-                reason=item.reason if item.reason else strings.messages["no_reason"],
-            )
-            for item in global_passed_list
-        ]
-        if not global_passed_str_list:
-            global_passed_str_list.append(strings.messages["no_global_passed"])
-
-        group_banned_text = strings.messages["group_banned_list"] + "".join(
-            group_banned_str_list
-        )
-        global_banned_text = strings.messages["global_banned_list"] + "".join(
-            global_banned_str_list
-        )
-        group_passed_text = strings.messages["group_passed_list"] + "".join(
-            group_passed_str_list
-        )
-        global_passed_text = strings.messages["global_passed_list"] + "".join(
-            global_passed_str_list
-        )
-
-        result = f"{group_banned_text}\n\n{global_banned_text}\n\n{group_passed_text}\n\n{global_passed_text}"
-        yield event.plain_result(result)
-
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("ban-enable")
-    async def ban_enable(self, event: AstrMessageEvent):
-        """
-        启用禁用功能
-        """
-        self.enable = True
-        yield event.plain_result(strings.messages["ban_enabled"])
-        logger.warning(
-            f"已临时启用禁用功能(In {event.unified_msg_origin} - {event.get_sender_name()}({event.get_sender_id()}))"
-        )
-
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("ban-disable")
-    async def ban_disable(self, event: AstrMessageEvent):
-        """
-        停用禁用功能
-        """
-        self.enable = False
-        yield event.plain_result(strings.messages["ban_disabled"])
-        logger.warning(
-            f"已临时禁用禁用功能(In {event.unified_msg_origin} - {event.get_sender_name()}({event.get_sender_id()}))"
-        )
-
-    @filter.command("ban-help")
+    @filter.command("banhelp")
     async def ban_help(self, event: AstrMessageEvent):
         """
         显示reneban帮助信息
         """
-        yield event.plain_result(strings.messages["help_text"])
+        yield event.plain_result("\n".join([cmd for k, cmd in strings.commands.items()]))
+
+    def update_user(
+            self,
+            umo: str,
+            tgt_users: list[str],
+            is_ban: bool,
+            _time: float,
+            _reason: str,
+            is_global=False,
+    ):
+        expire_reason = banpass_manager.build_expire_reason(_time, _reason)
+
+        # 这里如果是ban的话，重置pass记录
+        bp = banpass_manager.BanPass(ban_=expire_reason, pass_=banpass_manager.ExpireReason()) if is_ban else banpass_manager.BanPass(pass_=expire_reason)
+        for user in tgt_users:
+            self.manager.update(umo, user, bp, is_global)
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("ban")
     async def ban_user(
-        self,
-        event: AstrMessageEvent,
-        banuser: str,
-        time: str = "0",
-        reason: str | None = None,
-        umo: str | None = None,
-        end: str | None = None,
+            self,
+            event: AstrMessageEvent,
     ):
         """
         在会话中禁用指定用户的使用权限。
@@ -193,91 +83,31 @@ class ReNeBan(Star):
         示例：/ban @张三 7d
         注意：单次仅能禁用一个会话的一个用户
         """
-        if end is not None:
-            # 若end存在，说明语法错误，发送错误信息并return
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="ban", commands_text=strings.commands["ban"]
-                )
-            )
-            return
-        if umo == None:
-            # 若umo不存在，则使用event.unified_msg_origin（当前群）
-            umo = event.unified_msg_origin
-        if reason in strings.no_reason:
-            # 若reason在no_reason中，则reason为None（无理由）
-            reason = None
-        # 我没法了（（（
+        umo = event.unified_msg_origin
         try:
-            ban_uid: str
-            if EventUtils.get_event_at(event) == None:
-                ban_uid = banuser
-            else:
-                ban_uid = EventUtils.get_event_at(event)  # type: ignore
-        except AtNumberError:
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="ban", commands_text=strings.commands["ban"]
-                )
-            )
+            tgt_users, _time, _reason = extract_args(event)
+        except ValueError as err:
+            logger.error(err)
+            yield event.plain_result(str(err) + "\n" + strings.MSG_HELP_TIME_FORMAT)
             return
-        # 准备ban_user
-        self.data_manager.clear_banned()
-        banlist = self.data_manager.read_file(
-            self.data_manager.banlist_path
-        )  # dict[str, UserDataList]
-        if not isinstance(banlist.get(umo), UserDataList):
-            banlist[umo] = UserDataList()
-        group_banned_list = banlist.get(umo)  # UserDataList
-        tempbool = False
-        for item in group_banned_list:
-            if item.uid == ban_uid:
-                if item.time == 0:
-                    yield event.plain_result(
-                        strings.messages["time_zeroset_error"].format(command="ban")
-                    )
-                    return
-                else:
-                    # 更新时间
-                    new_time = (
-                        (item.time + time_utils.timestr_to_int(time))
-                        if time != "0"
-                        else 0
-                    )
-                    item.update_data(time=new_time, reason=reason)
-                    tempbool = True
-                    break
-            else:
-                continue
-        if not tempbool:
-            # 添加新的封禁记录
-            new_ban_item = UserDataModel(
-                uid=ban_uid,
-                time=(int(time_module.time()) + time_utils.timestr_to_int(time))
-                if time != "0"
-                else 0,
-                reason=reason,
-            )
-            group_banned_list.append(new_ban_item)
-        logger.warning(
-            f"[ban]{json.dumps([{k: [dict(item) for item in v] for k, v in banlist.items()}], indent=4, ensure_ascii=False)}"
-        )
-        self.data_manager.write_file(self.data_manager.banlist_path, banlist)
+        if not tgt_users:
+            yield event.plain_result(strings.MSG_NO_TARGETS)
+            return
+        if _time is None:
+            _time = float("inf")
+        self.update_user(umo, tgt_users, True, _time, _reason)
+
         yield event.plain_result(
             strings.messages["banned_user"].format(
-                umo=umo, user=ban_uid, time=time_utils.time_format(time), reason=reason
+                umo=umo, user=str(tgt_users), time=time_utils.time_remaining_format(_time), reason=_reason
             )
         )
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("ban-all")
     async def ban_all(
-        self,
-        event: AstrMessageEvent,
-        banuser: str,
-        time: str = "0",
-        reason: str | None = None,
-        end: str | None = None,
+            self,
+            event: AstrMessageEvent,
     ):
         """
         在全局禁用指定用户的使用权限。
@@ -286,84 +116,29 @@ class ReNeBan(Star):
         示例：/ban-all @张三 7d
         注意：单次仅能禁用一个用户
         """
-        if end is not None:
-            # 若end存在，说明语法错误，发送错误信息并return
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="ban-all", commands_text=strings.commands["ban-all"]
-                )
-            )
-            return
-        if reason in strings.no_reason:
-            # 若reason在no_reason中，则reason为None（无理由）
-            reason = None
+        umo = event.unified_msg_origin
         try:
-            ban_uid: str
-            if EventUtils.get_event_at(event) == None:
-                ban_uid = banuser
-            else:
-                ban_uid = EventUtils.get_event_at(event)  # type: ignore
-        except AtNumberError:
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="ban-all", commands_text=strings.commands["ban-all"]
-                )
-            )
+            tgt_users, _time, _reason = extract_args(event)
+        except ValueError as err:
+            logger.error(err)
+            yield event.plain_result(str(err) + "\n" + strings.MSG_HELP_TIME_FORMAT)
             return
-        self.data_manager.clear_banned()
-        banall_list = self.data_manager.read_file(
-            self.data_manager.banall_list_path
-        )  # UserDataList
-        tempbool = False
-        for item in banall_list:
-            if item.uid == ban_uid:
-                if item.time == 0:
-                    yield event.plain_result(
-                        strings.messages["time_zeroset_error"].format(command="ban-all")
-                    )
-                    return
-                else:
-                    # 更新时间
-                    new_time = (
-                        (item.time + time_utils.timestr_to_int(time))
-                        if time != "0"
-                        else 0
-                    )
-                    item.update_data(time=new_time, reason=reason)
-                    tempbool = True
-                    break
-            else:
-                continue
-        if not tempbool:
-            # 添加新的全局封禁记录
-            new_ban_item = UserDataModel(
-                uid=ban_uid,
-                time=(int(time_module.time()) + time_utils.timestr_to_int(time))
-                if time != "0"
-                else 0,
-                reason=reason,
-            )
-            banall_list.append(new_ban_item)
-        logger.warning(
-            f"[ban-all]{json.dumps([dict(item) for item in banall_list], indent=4, ensure_ascii=False)}"
-        )
-        self.data_manager.write_file(self.data_manager.banall_list_path, banall_list)
+        if not tgt_users:
+            yield event.plain_result(strings.MSG_NO_TARGETS)
+            return
+        self.update_user(umo, tgt_users, True, _time, _reason, True)
+
         yield event.plain_result(
             strings.messages["banned_user_global"].format(
-                user=ban_uid, time=time_utils.time_format(time), reason=reason
+                user=str(tgt_users), time=time_utils.time_remaining_format(_time), reason=_reason
             )
         )
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("pass")
     async def pass_user(
-        self,
-        event: AstrMessageEvent,
-        passuser: str,
-        time: str = "0",
-        reason: str | None = None,
-        umo: str | None = None,
-        end: str | None = None,
+            self,
+            event: AstrMessageEvent,
     ):
         """
         在会话中解限指定用户。
@@ -372,86 +147,29 @@ class ReNeBan(Star):
         示例：/pass @张三 7d
         注意：单次仅能解限一个会话的一个用户
         """
-        if end is not None:
-            # 若end存在，说明语法错误，发送错误信息并return
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="pass", commands_text=strings.commands["pass"]
-                )
-            )
-            return
-        if umo == None:
-            # 若umo不存在，则使用event.unified_msg_origin（当前群）
-            umo = event.unified_msg_origin
-        if reason in strings.no_reason:
-            # 若reason在no_reason中，则reason为None（无理由）
-            reason = None
+        umo = event.unified_msg_origin
         try:
-            pass_uid: str
-            if EventUtils.get_event_at(event) == None:
-                pass_uid = passuser
-            else:
-                pass_uid = EventUtils.get_event_at(event)  # type: ignore
-        except AtNumberError:
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="pass", commands_text=strings.commands["pass"]
-                )
-            )
+            tgt_users, _time, _reason = extract_args(event)
+        except ValueError as err:
+            logger.error(err)
+            yield event.plain_result(str(err) + "\n" + strings.MSG_HELP_TIME_FORMAT)
             return
-        self.data_manager.clear_banned()
-        passlist = self.data_manager.read_file(
-            self.data_manager.passlist_path
-        )  # dict[str, UserDataList]
-        if not isinstance(passlist.get(umo), UserDataList):
-            passlist[umo] = UserDataList()
-        group_passed_list = passlist.get(umo)  # UserDataList
-        tempbool = False
-        for item in group_passed_list:
-            if item.uid == pass_uid:
-                if item.time == 0:
-                    yield event.plain_result(
-                        strings.messages["time_zeroset_error"].format(command="pass")
-                    )
-                    return
-                else:
-                    # 更新时间
-                    new_time = (
-                        (item.time + time_utils.timestr_to_int(time))
-                        if time != "0"
-                        else 0
-                    )
-                    item.update_data(time=new_time, reason=reason)
-                    tempbool = True
-                    break
-            else:
-                continue
-        if not tempbool:
-            # 添加新的解限记录
-            new_pass_item = UserDataModel(
-                uid=pass_uid,
-                time=(int(time_module.time()) + time_utils.timestr_to_int(time))
-                if time != "0"
-                else 0,
-                reason=reason,
-            )
-            group_passed_list.append(new_pass_item)
-        self.data_manager.write_file(self.data_manager.passlist_path, passlist)
+        if not tgt_users:
+            yield event.plain_result(strings.MSG_NO_TARGETS)
+            return
+        self.update_user(umo, tgt_users, False, _time, _reason, False)
+
         yield event.plain_result(
             strings.messages["passed_user"].format(
-                umo=umo, user=pass_uid, time=time_utils.time_format(time), reason=reason
+                umo=umo, user=str(tgt_users), time=time_utils.time_remaining_format(_time), reason=_reason
             )
         )
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("pass-all")
     async def pass_all(
-        self,
-        event: AstrMessageEvent,
-        passuser: str,
-        time: str = "0",
-        reason: str | None = None,
-        end: str | None = None,
+            self,
+            event: AstrMessageEvent,
     ):
         """
         在全局中解限指定用户。
@@ -460,493 +178,62 @@ class ReNeBan(Star):
         示例：/pass-all @张三 7d
         注意：单次仅能解限一个用户
         """
-        if end is not None:
-            # 若end存在，说明语法错误，发送错误信息并return
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="pass-all", commands_text=strings.commands["pass-all"]
-                )
-            )
-            return
-        if reason in strings.no_reason:
-            # 若reason在no_reason中，则reason为None（无理由）
-            reason = None
+        umo = event.unified_msg_origin
         try:
-            pass_uid: str
-            if EventUtils.get_event_at(event) == None:
-                pass_uid = passuser
-            else:
-                pass_uid = EventUtils.get_event_at(event)  # type: ignore
-        except AtNumberError:
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="pass-all", commands_text=strings.commands["pass-all"]
-                )
-            )
+            tgt_users, _time, _reason = extract_args(event)
+        except ValueError as err:
+            logger.error(err)
+            yield event.plain_result(str(err) + "\n" + strings.MSG_HELP_TIME_FORMAT)
             return
-        self.data_manager.clear_banned()
-        passall_list = self.data_manager.read_file(
-            self.data_manager.passall_list_path
-        )  # UserDataList
-        tempbool = False
-        for item in passall_list:
-            if item.uid == pass_uid:
-                if item.time == 0:
-                    yield event.plain_result(
-                        strings.messages["time_zeroset_error"].format(
-                            command="pass-all"
-                        )
-                    )
-                    return
-                else:
-                    # 更新时间
-                    new_time = (
-                        (item.time + time_utils.timestr_to_int(time))
-                        if time != "0"
-                        else 0
-                    )
-                    item.update_data(time=new_time, reason=reason)
-                    tempbool = True
-                    break
-            else:
-                continue
-        if not tempbool:
-            # 添加新的全局解限记录
-            new_pass_item = UserDataModel(
-                uid=pass_uid,
-                time=(int(time_module.time()) + time_utils.timestr_to_int(time))
-                if time != "0"
-                else 0,
-                reason=reason,
-            )
-            passall_list.append(new_pass_item)
-        self.data_manager.write_file(self.data_manager.passall_list_path, passall_list)
+        if not tgt_users:
+            yield event.plain_result(strings.MSG_NO_TARGETS)
+            return
+        self.update_user(umo, tgt_users, False, _time, _reason, True)
+
         yield event.plain_result(
             strings.messages["passed_user_global"].format(
-                user=pass_uid, time=time_utils.time_format(time), reason=reason
+                user=str(tgt_users), time=time_utils.time_remaining_format(_time), reason=_reason
             )
         )
 
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("dec-pass")
-    async def dec_pass(
-        self,
-        event: AstrMessageEvent,
-        passuser: str,
-        time: str = "0",
-        reason: str | None = None,
-        umo: str | None = None,
-        end: str | None = None,
-    ):
-        """
-        删除指定用户的会话解限时间。
-        格式：/dec-pass <@用户|UID（QQ号）> [时间（默认无期限）] [理由（默认无理由）] [UMO]
-        时间格式：数字+单位（d=天，h=小时，m=分钟，s=秒），如 1d 表示1天，12h 表示12个小时，不带单位默认秒，0表示彻底删除解限记录
-        示例：/dec-pass @张三 7d
-        注意：单次仅能操作一个会话的一个用户
-        """
-        if end is not None:
-            # 若end存在，说明语法错误，发送错误信息并return
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="dec-pass", commands_text=strings.commands["dec-pass"]
-                )
-            )
-            return
-        if umo == None:
-            # 若umo不存在，则使用event.unified_msg_origin（当前群）
-            umo = event.unified_msg_origin
-        if reason in strings.no_reason:
-            # 若reason在no_reason中，则reason为None（无理由）
-            reason = None
-        try:
-            pass_uid: str
-            if EventUtils.get_event_at(event) == None:
-                pass_uid = passuser
-            else:
-                pass_uid = EventUtils.get_event_at(event)  # type: ignore
-        except AtNumberError:
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="dec-pass", commands_text=strings.commands["dec-pass"]
-                )
-            )
-            return
-        self.data_manager.clear_banned()
-        passlist = self.data_manager.read_file(
-            self.data_manager.passlist_path
-        )  # dict[str, UserDataList]
-        group_passed_list = passlist.get(umo)  # UserDataList
-        if not isinstance(group_passed_list, UserDataList):
-            yield event.plain_result(strings.messages["dec_no_record"])
-            return
-        for item in group_passed_list:
-            if item.uid == pass_uid:
-                if time == "0":
-                    group_passed_list.remove(item)
-                    self.data_manager.write_file(
-                        self.data_manager.passlist_path, passlist
+    @filter.command("bancheck")
+    async def ban_check(self, event: AstrMessageEvent):
+        umo = event.unified_msg_origin
+        tgt_users, _, _ = extract_args(event)
+        if not tgt_users:
+            tgt_users.append(event.get_sender_id())
+
+        result_str = []
+        now = time.time()
+        for user in tgt_users:
+            bp = self.manager.get(umo, user)
+            if bp:
+                if bp.is_baned():
+                    result_str.append(
+                        strings.messages["banned_user"].format(umo=umo, user=user, time=time_utils.time_remaining_format(
+                            bp.ban_.get_expire_at() - now), reason=bp.ban_.get_reason())
                     )
-                    yield event.plain_result(
-                        strings.messages["dec_passed_user"].format(
-                            umo=umo,
-                            user=pass_uid,
-                            time=time_utils.time_format(time),
-                            reason=reason,
-                        )
-                    )
-                    return
-                if item.time == 0:
-                    yield event.plain_result(strings.messages["dec_zerotime_error"])
-                    return
                 else:
-                    new_time = item.time - time_utils.timestr_to_int(time)
-                    item.update_data(time=new_time, reason=reason)
-                    self.data_manager.write_file(
-                        self.data_manager.passlist_path, passlist
+                    result_str.append(
+                        strings.messages["passed_user"].format(umo=umo, user=user, time=time_utils.time_remaining_format(
+                            bp.pass_.get_expire_at() - now), reason=bp.pass_.get_reason())
                     )
-                    yield event.plain_result(
-                        strings.messages["dec_passed_user"].format(
-                            umo=umo,
-                            user=pass_uid,
-                            time=time_utils.time_format(time),
-                            reason=reason,
-                        )
-                    )
-                    return
-        yield event.plain_result(strings.messages["dec_no_record"])
-
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("dec-pass-all")
-    async def dec_pass_all(
-        self,
-        event: AstrMessageEvent,
-        passuser: str,
-        time: str = "0",
-        reason: str | None = None,
-        end: str | None = None,
-    ):
-        """
-        删除指定用户的全局解限时间。
-        格式：/dec-pass-all <@用户|UID（QQ号）> [时间（默认无期限）] [理由（默认无理由）]
-        时间格式：数字+单位（d=天，h=小时，m=分钟，s=秒），如 1d 表示1天，12h 表示12个小时，不带单位默认秒，0表示彻底删除解限记录
-        示例：/dec-pass-all @张三 7d
-        注意：单次仅能操作一个用户
-        """
-        if end is not None:
-            # 若end存在，说明语法错误，发送错误信息并return
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="dec-pass-all",
-                    commands_text=strings.commands["dec-pass-all"],
-                )
-            )
-            return
-        if reason in strings.no_reason:
-            # 若reason在no_reason中，则reason为None（无理由）
-            reason = None
-        try:
-            pass_uid: str
-            if EventUtils.get_event_at(event) == None:
-                pass_uid = passuser
-            else:
-                pass_uid = EventUtils.get_event_at(event)  # type: ignore
-        except AtNumberError:
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="dec-pass-all",
-                    commands_text=strings.commands["dec-pass-all"],
-                )
-            )
-            return
-        self.data_manager.clear_banned()
-        passall_list = self.data_manager.read_file(
-            self.data_manager.passall_list_path
-        )  # UserDataList
-        for item in passall_list:
-            if item.uid == pass_uid:
-                if time == "0":
-                    passall_list.remove(item)
-                    self.data_manager.write_file(
-                        self.data_manager.passall_list_path, passall_list
-                    )
-                    yield event.plain_result(
-                        strings.messages["dec_passed_user_global"].format(
-                            user=pass_uid,
-                            time=time_utils.time_format(time),
-                            reason=reason,
-                        )
-                    )
-                    return
-                else:
-                    new_time = item.time - time_utils.timestr_to_int(time)
-                    item.update_data(time=new_time, reason=reason)
-                    self.data_manager.write_file(
-                        self.data_manager.passall_list_path, passall_list
-                    )
-                    yield event.plain_result(
-                        strings.messages["dec_passed_user_global"].format(
-                            user=pass_uid,
-                            time=time_utils.time_format(time),
-                            reason=reason,
-                        )
-                    )
-                    return
-        yield event.plain_result(strings.messages["dec_no_record"])
-
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("dec-ban")
-    async def dec_ban(
-        self,
-        event: AstrMessageEvent,
-        banuser: str,
-        time: str = "0",
-        reason: str | None = None,
-        umo: str | None = None,
-        end: str | None = None,
-    ):
-        """
-        删除指定用户的会话封禁时间。
-        格式：/dec-ban <@用户|UID（QQ号）> [时间（默认无期限）] [理由（默认无理由）] [UMO]
-        时间格式：数字+单位（d=天，h=小时，m=分钟，s=秒），如 1d 表示1天，12h 表示12个小时，不带单位默认秒，0表示彻底删除封禁记录
-        示例：/dec-ban @张三 7d
-        注意：单次仅能操作一个会话的一个用户
-        """
-        if end is not None:
-            # 若end存在，说明语法错误，发送错误信息并return
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="dec-ban", commands_text=strings.commands["dec-ban"]
-                )
-            )
-            return
-        if umo == None:
-            # 若umo不存在，则使用event.unified_msg_origin（当前群）
-            umo = event.unified_msg_origin
-        if reason in strings.no_reason:
-            # 若reason在no_reason中，则reason为None（无理由）
-            reason = None
-        try:
-            ban_uid: str
-            if EventUtils.get_event_at(event) == None:
-                ban_uid = banuser
-            else:
-                ban_uid = EventUtils.get_event_at(event)  # type: ignore
-        except AtNumberError:
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="dec-ban", commands_text=strings.commands["dec-ban"]
-                )
-            )
-            return
-        self.data_manager.clear_banned()
-        banlist = self.data_manager.read_file(
-            self.data_manager.banlist_path
-        )  # dict[str, UserDataList]
-        group_banned_list = banlist.get(umo)  # UserDataList
-        if not isinstance(group_banned_list, UserDataList):
-            yield event.plain_result(strings.messages["dec_no_record"])
-            return
-        for item in group_banned_list:
-            if item.uid == ban_uid:
-                if time == "0":
-                    group_banned_list.remove(item)
-                    self.data_manager.write_file(
-                        self.data_manager.banlist_path, banlist
-                    )
-                    yield event.plain_result(
-                        strings.messages["dec_banned_user"].format(
-                            umo=umo,
-                            user=ban_uid,
-                            time=time_utils.time_format(time),
-                            reason=reason,
-                        )
-                    )
-                    return
-                if item.time == 0:
-                    yield event.plain_result(strings.messages["dec_zerotime_error"])
-                    return
-                else:
-                    new_time = item.time - time_utils.timestr_to_int(time)
-                    item.update_data(time=new_time, reason=reason)
-                    self.data_manager.write_file(
-                        self.data_manager.banlist_path, banlist
-                    )
-                    yield event.plain_result(
-                        strings.messages["dec_banned_user"].format(
-                            umo=umo,
-                            user=ban_uid,
-                            time=time_utils.time_format(time),
-                            reason=reason,
-                        )
-                    )
-                    return
-        yield event.plain_result(strings.messages["dec_no_record"])
-
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("dec-ban-all")
-    async def dec_ban_all(
-        self,
-        event: AstrMessageEvent,
-        banuser: str,
-        time: str = "0",
-        reason: str | None = None,
-        end: str | None = None,
-    ):
-        """
-        删除指定用户的全局封禁时间。
-        格式：/dec-ban-all <@用户|UID（QQ号）> [时间（默认无期限）] [理由（默认无理由）]
-        时间格式：数字+单位（d=天，h=小时，m=分钟，s=秒），如 1d 表示1天，12h 表示12个小时，不带单位默认秒，0表示彻底删除封禁记录
-        示例：/dec-ban-all @张三 7d
-        注意：单次仅能操作一个用户
-        """
-        if end is not None:
-            # 若end存在，说明语法错误，发送错误信息并return
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="dec-ban-all", commands_text=strings.commands["dec-ban-all"]
-                )
-            )
-            return
-        if reason in strings.no_reason:
-            # 若reason在no_reason中，则reason为None（无理由）
-            reason = None
-        try:
-            ban_uid: str
-            if EventUtils.get_event_at(event) == None:
-                ban_uid = banuser
-            else:
-                ban_uid = EventUtils.get_event_at(event)  # type: ignore
-        except AtNumberError:
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="dec-ban-all", commands_text=strings.commands["dec-ban-all"]
-                )
-            )
-            return
-        self.data_manager.clear_banned()
-        banall_list = self.data_manager.read_file(
-            self.data_manager.banall_list_path
-        )  # UserDataList
-        for item in banall_list:
-            if item.uid == ban_uid:
-                if time == "0":
-                    banall_list.remove(item)
-                    self.data_manager.write_file(
-                        self.data_manager.banall_list_path, banall_list
-                    )
-                    yield event.plain_result(
-                        strings.messages["dec_banned_user_global"].format(
-                            user=ban_uid,
-                            time=time_utils.time_format(time),
-                            reason=reason,
-                        )
-                    )
-                    return
-                if item.time == 0:
-                    yield event.plain_result(strings.messages["dec_zerotime_error"])
-                    return
-                else:
-                    new_time = item.time - time_utils.timestr_to_int(time)
-                    item.update_data(time=new_time, reason=reason)
-                    self.data_manager.write_file(
-                        self.data_manager.banall_list_path, banall_list
-                    )
-                    yield event.plain_result(
-                        strings.messages["dec_banned_user_global"].format(
-                            user=ban_uid,
-                            time=time_utils.time_format(time),
-                            reason=reason,
-                        )
-                    )
-                    return
-        yield event.plain_result(strings.messages["dec_no_record"])
-
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("ban-reset")
-    async def ban_reset(
-        self, event: AstrMessageEvent, resetuser: str, end: str | None = None
-    ):
-        """
-        删除一名指定用户的所有记录
-        格式：/ban-reset <@用户|UID（QQ号）>
-        示例：/ban-reset @张三
-        注意：单次仅能操作一个用户
-        """
-        if end is not None:
-            # 若end存在，说明语法错误，发送错误信息并return
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="ban-reset", commands_text=strings.commands["ban-reset"]
-                )
-            )
-            return
-        try:
-            reset_uid: str
-            if EventUtils.get_event_at(event) is None:
-                reset_uid = resetuser
-            else:
-                reset_uid = EventUtils.get_event_at(event)  # type: ignore
-        except AtNumberError:
-            yield event.plain_result(
-                strings.messages["command_error"].format(
-                    command="ban-reset", commands_text=strings.commands["ban-reset"]
-                )
-            )
-            return
-        self.data_manager.clear_banned()
-
-        banall_data = self.data_manager.read_file(
-            self.data_manager.banall_list_path
-        )  # UserDataList
-        passall_data = self.data_manager.read_file(
-            self.data_manager.passall_list_path
-        )  # UserDataList
-        ban_data = self.data_manager.read_file(
-            self.data_manager.banlist_path
-        )  # dict[str, UserDataList]
-        pass_data = self.data_manager.read_file(
-            self.data_manager.passlist_path
-        )  # dict[str, UserDataList]
-        # 从全局封禁列表中移除该用户
-        banall_data = UserDataList(
-            [item for item in banall_data if item.uid != reset_uid]
-        )
-        # 从全局解封列表中移除该用户
-        passall_data = UserDataList(
-            [item for item in passall_data if item.uid != reset_uid]
-        )
-        # 从各UMO的封禁列表中移除该用户
-        for umo in list(ban_data.keys()):
-            ban_data[umo] = UserDataList(
-                [item for item in ban_data[umo] if item.uid != reset_uid]
-            )
-        # 从各UMO的解封列表中移除该用户
-        for umo in list(pass_data.keys()):
-            pass_data[umo] = UserDataList(
-                [item for item in pass_data[umo] if item.uid != reset_uid]
-            )
-        # 将修改后的数据写回文件
-        self.data_manager.write_file(self.data_manager.banall_list_path, banall_data)
-        self.data_manager.write_file(self.data_manager.passall_list_path, passall_data)
-        self.data_manager.write_file(self.data_manager.banlist_path, ban_data)
-        self.data_manager.write_file(self.data_manager.passlist_path, pass_data)
-
-        yield event.plain_result(
-            strings.messages["ban_reset_success"].format(user=reset_uid)
-        )
+        if result_str:
+            yield event.plain_result("\n".join(result_str))
+        else:
+            yield event.plain_result(strings.MSG_NO_BAN_RECORD)
 
     # 设置优先级，可在其他未设置优先级（priority=0）的命令/监听器/钩子前过滤
-    @filter.event_message_type(filter.EventMessageType.ALL, priority=1)
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=10000)
     async def filter_banned_users(self, event: AstrMessageEvent):
         """
         全局事件过滤器：
         如果禁用功能启用且发送者被禁用，则停止事件传播，机器人不再响应该用户的消息。
         """
-        if (
-            self.enable
-            and EventUtils.is_banned(self.enable, self.data_manager, event)[0]
-        ):
+        if "bancheck" in event.message_str.strip():
+            return
+        if self.manager.is_baned(event.unified_msg_origin, event.get_sender_id()):
+            logger.info(f"用户{event.get_sender_id()}已从{event.unified_msg_origin}被禁用")
             event.stop_event()
 
     async def terminate(self):

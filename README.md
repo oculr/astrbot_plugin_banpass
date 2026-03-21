@@ -1,38 +1,34 @@
 <div align="center">
 
-# ReNeBan
+# BanPass
 
 _🚫 为 [astrbot](https://github.com/AstrBotDevs/AstrBot) 设计的简易黑名单插件 🚫_
 
 [![License](https://img.shields.io/badge/License-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
 <br>
 [![AstrBot](https://img.shields.io/badge/AstrBot-yellow.svg)](https://github.com/AstrBotDevs/AstrBot)
-<br>
-[![GitHub](https://img.shields.io/badge/NekoiMeiov__Team-orange.svg?style=for-the-badge)](https://github.com/NekoiMeiov)
-
 </div>
 
 ## 介绍
-ReNeBan 是一个为 [astrbot](https://github.com/AstrBotDevs/AstrBot) 设计的简易黑名单插件，允许bot管理员在**会话**或**全局**范围较为灵活地禁用指定用户。
+
+BanPass 是一个为 [astrbot](https://github.com/AstrBotDevs/AstrBot) 设计的简易黑名单插件，允许bot管理员在**会话**或**全局
+**范围较为灵活地禁用指定用户。
 ReNeBan 允许为**禁用/解禁**设置**时限**和**理由**，并自动整理记录。
-ReNeBan 的指令优先级策略为：`会话 > 全局`，`pass > ban`。
+
+该插件重构于[NekoiMeiov/astrbot_plugin_reneban](https://github.com/NekoiMeiov/astrbot_plugin_reneban)
+
+---
 
 ## 命令
-| 命令 | 语法 | 说明 | 示例 |
-|------|------|------|------|
-| `/ban` | /ban <@用户\|UID（QQ号）> [时间（默认无期限）] [理由（默认无理由）] [UMO] | 在**指定会话**范围内禁用**一名指定用户** | /ban @AAA高价收游戏账号 0 打广告 |
-| `/pass` | /pass <@用户\|UID（QQ号）> [时间（默认无期限）] [理由（默认无理由）] [UMO] | 在**指定会话**范围内解除禁用**一名指定用户** | /pass @yfseh218 0 None |
-| `/ban-all` | /ban-all <@用户\|UID（QQ号）> [时间（默认无期限）] [理由（默认无理由）] | 在**全局**范围内禁用**一名指定用户** | /ban-all 2110453981 1d30m 试图让bot输出敏感内容 |
-| `/pass-all` | /pass-all <@用户\|UID（QQ号）> [时间（默认无期限）] [理由（默认无理由）] | 在**全局**范围内解除禁用**一名指定用户** | /pass-all @我想不出来啥名了 0 误封 |
-| `/ban-enable` | /ban-enable | 启用禁用功能，重启后失效 | /ban-enable |
-| `/ban-disable` | /ban-disable | 禁用禁用功能，重启后失效 | /ban-disable |
-| `/banlist` | /banlist | 输出在**当前会话**与**全局**范围下的**禁用/解禁**情况（包括**UID/剩余时长/理由**） | /banlist |
-| `/ban-help` | /ban-help | 输出简易帮助信息 | /ban-help |
-| `/dec-ban` | /dec-ban <@用户\|UID（QQ号）> [时间（默认无期限）] [理由（默认无理由）] [UMO] | 删除在**指定会话**范围内对**一名指定用户**的禁用记录 | /dec-ban @UserA 0 表现良好 |
-| `/dec-pass` | /dec-pass <@用户\|UID（QQ号）> [时间（默认无期限）] [理由（默认无理由）] [UMO] | 删除在**指定会话**范围内对**一名指定用户**的解禁记录 | /dec-pass @UserB 0 None |
-| `/dec-ban-all` | /dec-ban-all <@用户\|UID（QQ号）> [时间（默认无期限）] [理由（默认无理由）] | 删除在**全局**范围内对**一名指定用户**的禁用记录 | /dec-ban-all 3869541370 1d30m 表现良好 |
-| `/dec-pass-all` | /dec-pass-all <@用户\|UID（QQ号）> [时间（默认无期限）] [理由（默认无理由）] | 删除在**全局**范围内对**一名指定用户**的解禁记录 | /dec-pass-all @XYZ 0 NULL |
-| `/ban-reset` | /ban-reset <@用户\|UID（QQ号）> | 删除**一名指定用户**的**所有**记录 | /ban-reset @NekoiMeiov |
+
+| 命令          | 语法                                               | 说明                       | 示例                                      |
+|-------------|--------------------------------------------------|--------------------------|-----------------------------------------|
+| `/ban`      | /ban <@用户> [<@用户2>] [时间（默认无期限）] [理由（默认无理由）]      | 在**当前会话**范围内禁用**指定用户**   | /ban @AAA高价收游戏账号 inf 打广告                |
+| `/pass`     | /pass <@用户> [<@用户2>] [时间（默认无期限）] [理由（默认无理由）]     | 在**当前会话**范围内解除禁用**指定用户** | /pass @yfseh218 0 None                  |
+| `/ban-all`  | /ban-all <@用户> [<@用户2>] [时间（默认无期限）] [理由（默认无理由）]  | 在**全局**范围内禁用**指定用户**     | /ban-all @2110453981 1d30m 试图让bot输出敏感内容 |
+| `/pass-all` | /pass-all <@用户> [<@用户2>] [时间（默认无期限）] [理由（默认无理由）] | 在**全局**范围内解除禁用**指定用户**   | /pass-all @我想不出来啥名了 0 误封                |
+| `/banhelp`  | /banhelp                                         | 输出简易帮助信息                 | /banhelp                                |
+| `/bancheck` | /bancheck <@用户> [<@用户2>]                         | 查询**指定用户**的封禁状态          | /banhelp@NekoiMeiov                     |
 
 时间字段支持如下格式：
 
@@ -41,17 +37,13 @@ ReNeBan 的指令优先级策略为：`会话 > 全局`，`pass > ban`。
 - `2h` → 2 小时
 - `30m` → 30 分钟
 - `10s`，`10` → 10 秒
-- `0` → 永久（默认，且不支持与以上单位复用）
+- `0`/`inf` → 永久（默认，且不支持与以上单位复用）
 ```
 
 输入时需按单位大小填写！不允许如`20m1h`的时间表达式！
 
-以下理由将会被判定为无理由：
-- `"无理由"`
-- `"None"`
-- `"NULL"`
-
 ## 安装
+
 - 从插件市场安装
 
 在 插件管理 - 插件市场 搜索 ReNeBan
@@ -59,23 +51,24 @@ ReNeBan 的指令优先级策略为：`会话 > 全局`，`pass > ban`。
 - 从链接安装
 
 在 插件管理 - 安装 - 从链接安装 输入以下链接
+
 ``` text
-https://github.com/NekoiMeiov/astrbot_plugin_reneban
+https://github.com/oculr/astrbot_plugin_banpass
 ```
 
 - 从源码安装
 
 在终端中输入以下命令（若为手动安装，请将 /AstrBot 修改为手动安装的路径）
+
 ```bash
 # 克隆仓库到插件目录
 cd /AstrBot/data/plugins
-git clone https://github.com/NekoiMeiov/astrbot_plugin_reneban
+git clone https://github.com/oculr/astrbot_plugin_banpass.git
 
 # 控制台重启AstrBot
 ```
 
 ## 贡献指南
 
-- 给...给这个Repo点个Star（不...不给也可以......）
 - 提交 Issue 报告问题/提出建议
 - 提交 Pull Request 改进
