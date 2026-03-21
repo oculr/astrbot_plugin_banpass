@@ -39,7 +39,7 @@ def extract_args(event: AstrMessageEvent):
         _reason = split[1]
     return at_users, _time, _reason
 
-class ReNeBan(Star):
+class BanPass(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         # 初始化数据文件管理器
         super().__init__(context, config)
