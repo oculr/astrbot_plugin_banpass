@@ -13,6 +13,8 @@ commands = {
     "ban-all": "/ban-all <@用户> [时间（默认无期限）] [理由（默认无理由）]",
     "pass": "/pass <@用户> [时间（默认无期限）] [理由（默认无理由）]",
     "pass-all": "/pass-all <@用户> [时间（默认无期限）] [理由（默认无理由）]",
+    "banhelp": "/banhelp 输出简易帮助信息",
+    "bancheck": "/bancheck <@用户> [<@用户2>] ->  查询**指定用户**的封禁状态"
 }
 # 输出文案
 messages = {
